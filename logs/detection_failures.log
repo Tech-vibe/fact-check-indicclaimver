@@ -1,0 +1,15 @@
+ID       : ID001
+REASON   : Low confidence below 0.3
+DETECTED : en:0.29
+CLAIM    : All BJP leaders praise Modi but he never praises BJP leaders
+--------------------------------------------------
+ID       : ID007
+REASON   : No supported language found
+DETECTED : [tl:0.9996919881816434]
+CLAIM    : AI
+--------------------------------------------------
+ID       : ID008
+REASON   : LangDetect exception
+DETECTED : unknown
+CLAIM    : 2024
+--------------------------------------------------

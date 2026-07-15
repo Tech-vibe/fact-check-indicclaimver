@@ -1,45 +1,33 @@
-from langdetect import detect, LangDetectException
-import os
-
-SUPPORTED_LANGUAGES = {
-    "en": "English",
-    "hi": "Hindi",
-    "ml": "Malayalam",
-    "ta": "Tamil",
-    "te": "Telugu",
-    "kn": "Kannada",
-    "bn": "Bengali",
-    "mr": "Marathi",
-    "gu": "Gujarati",
-    "pa": "Punjabi",
-    "ur": "Urdu",
-}
-
-os.makedirs("logs", exist_ok=True)
-LOG_FILE = "logs/detection_failures.log"
-
-def log_failure(claim: str, detected_lang: str, reason: str):
+def deduplicate_documents(documents: list) -> list:
     """
-    Writes failed detections to a log file.
-    """
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"REASON   : {reason}\n")
-        f.write(f"DETECTED : {detected_lang}\n")
-        f.write(f"CLAIM    : {claim}\n")
-        f.write(f"{'-'*50}\n")
+    Removes duplicate/near-duplicate documents that may appear in
+    both the wikipedia and websearch results (e.g. the same
+    Wikipedia article fetched once via wikipedia.py and again via
+    websearch.py surfacing it as a search result).
 
-def detect_language(claim: str, claim_id: str = "unknown") -> str:
-    try:
-        lang = detect(claim)
-        
-        if lang in SUPPORTED_LANGUAGES:
-            print(f"[LANG] detected: {lang} ({SUPPORTED_LANGUAGES[lang]})")
-            return lang
-        else:
-            print(f"[WARN] ID:{claim_id} — Unsupported language '{lang}'. Defaulting to 'en'")
-            log_failure(claim, lang, "Unsupported language")
-            return "en"
-    except LangDetectException:
-        print(f"[WARN] ID:{claim_id} — Detection failed. Defaulting to 'en'")
-        log_failure(claim, "unknown", "LangDetect exception")
-        return "en"
+    Uses the first 300 characters as a lightweight fingerprint —
+    two documents starting identically are almost certainly the
+    same source, so this is enough without needing full hashing
+    or similarity comparison.
+    """
+    seen_signatures = set()
+    unique_documents = []
+
+    for doc in documents:
+        signature = doc[:300]
+
+        if signature in seen_signatures:
+            continue
+
+        seen_signatures.add(signature)
+        unique_documents.append(doc)
+
+    return unique_documents
+
+
+def clean_documents(documents: list) -> list:
+    """
+    Entry point: takes the combined raw document list from
+    wikipedia.py + websearch.py and removes cross-source duplicates.
+    """
+    return deduplicate_documents(documents)

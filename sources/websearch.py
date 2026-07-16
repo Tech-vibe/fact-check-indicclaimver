@@ -74,6 +74,18 @@ def fetch_page_text(url: str) -> str:
             print(f"[WEB] Failed to fetch {url[:60]} "
                   f"— status: {response.status_code}")
             return ""
+        
+
+        # detect PDF by content type header
+        content_type = response.headers.get("Content-Type", "")
+        if "pdf" in content_type.lower() or url.lower().endswith(".pdf"):
+            print(f"[WEB] Skipping PDF: {url[:60]}")
+            return ""
+
+        # detect PDF by checking first 4 bytes of content
+        if response.content[:4] == b"%PDF":
+            print(f"[WEB] Skipping PDF content: {url[:60]}")
+            return ""
 
         # parse the raw HTML using BeautifulSoup
         soup = BeautifulSoup(response.text, "html.parser")

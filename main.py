@@ -45,6 +45,8 @@ def process_claim(item: dict, force_lang: str = None) -> dict:
     """
     claim_id   = get_field(item, "ID", "id", "claim_id")
     claim_text = get_field(item, "Text", "text", "claim", "Claim")
+    # carry label forward for evaluation
+    label = get_field(item, "Label", "label", default="UNKNOWN")
 
     if not claim_text:
         print(f"[MAIN] ID:{claim_id} — Empty claim text. Skipping.")
@@ -78,6 +80,7 @@ def process_claim(item: dict, force_lang: str = None) -> dict:
         "id":        claim_id,
         "text":      claim_text,
         "documents": documents,
+        "label":     label, 
     }
 
 

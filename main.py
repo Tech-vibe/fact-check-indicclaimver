@@ -33,56 +33,66 @@ def get_field(item: dict, *keys, default=""):
     return default
 
 
-def process_claim(item: dict) -> dict:
+def process_claim(item: dict, force_lang: str = None) -> dict:
     """
     Runs the full retrieval pipeline for a single claim:
     detect language -> fetch from wikipedia -> fetch from web
     -> clean/dedupe -> return final record with just
     {id, text, documents}.
+
+    force_lang: if provided, skips detection and uses this language
+    directly. useful for codemix and when language is known upfront.
     """
-    claim_id = get_field(item, "ID", "id", "claim_id")
+    claim_id   = get_field(item, "ID", "id", "claim_id")
     claim_text = get_field(item, "Text", "text", "claim", "Claim")
 
     if not claim_text:
         print(f"[MAIN] ID:{claim_id} — Empty claim text. Skipping.")
         return None
 
-    # detect language; fall back to English if detection fails
-    # rather than dropping the claim entirely, so every claim in
-    # the input still gets an attempt at retrieval
-    lang_code = detect_language(claim_text, claim_id=claim_id)
-    if lang_code is None:
-        print(f"[MAIN] ID:{claim_id} — Language undetected. "
-              f"Falling back to '{DEFAULT_LANG}'.")
-        lang_code = DEFAULT_LANG
+    # if force_lang is provided use it directly
+    # skip detection entirely
+    if force_lang:
+        lang_code = force_lang
+        print(f"[MAIN] ID:{claim_id} — Using forced lang: {lang_code}")
+    else:
+        # auto detect language
+        # fall back to English if detection fails
+        lang_code = detect_language(claim_text, claim_id=claim_id)
+        if lang_code is None:
+            print(f"[MAIN] ID:{claim_id} — Language undetected. "
+                  f"Falling back to '{DEFAULT_LANG}'.")
+            lang_code = DEFAULT_LANG
 
     # retrieve from both sources
     wiki_docs = fetch_from_wikipedia(claim_text, lang_code)
-    web_docs = fetch_from_web(claim_text, lang_code)
+    web_docs  = fetch_from_web(claim_text, lang_code)
 
-    # combine, then dedupe cross-source duplicates (e.g. same
-    # wikipedia article surfacing from both fetchers)
-    all_docs = wiki_docs + web_docs
+    # combine then clean and deduplicate
+    all_docs  = wiki_docs + web_docs
     documents = clean_documents(all_docs)
 
     print(f"[MAIN] ID:{claim_id} — Final document count: {len(documents)}")
 
     return {
-        "id": claim_id,
-        "text": claim_text,
+        "id":        claim_id,
+        "text":      claim_text,
         "documents": documents,
     }
 
 
-def main(input_path: str, output_path: str):
+def main(input_path: str, output_path: str, force_lang: str = None):
     claims = load_claims(input_path)
     print(f"[MAIN] Loaded {len(claims)} claims from {input_path}")
+
+    if force_lang:
+        print(f"[MAIN] Language override: all claims → '{force_lang}'")
 
     results = []
 
     for i, item in enumerate(claims, start=1):
         print(f"\n[MAIN] Processing claim {i}/{len(claims)}")
-        record = process_claim(item)
+        record = process_claim(item, force_lang=force_lang)
         if record is not None:
             results.append(record)
 
@@ -93,11 +103,19 @@ def main(input_path: str, output_path: str):
 
 
 if __name__ == "__main__":
-    # usage: python main.py input.json output.json
-    if len(sys.argv) != 3:
-        print("Usage: python main.py <input_json> <output_json>")
+    # usage:
+    # python main.py input.json output.json          ← auto detect
+    # python main.py input.json output.json hi       ← force Hindi
+    # python main.py input.json output.json cm       ← force codemix
+    if len(sys.argv) < 3:
+        print("Usage: python main.py <input_json> <output_json> [language]")
         sys.exit(1)
 
-    input_file = sys.argv[1]
+    input_file  = sys.argv[1]
     output_file = sys.argv[2]
-    main(input_file, output_file)
+
+    # optional third argument — language code
+    # if not provided defaults to None → auto detect
+    force_lang  = sys.argv[3] if len(sys.argv) == 4 else None
+
+    main(input_file, output_file, force_lang)

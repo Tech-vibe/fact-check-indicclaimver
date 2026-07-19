@@ -13,3 +13,43 @@ REASON   : LangDetect exception
 DETECTED : unknown
 CLAIM    : 2024
 --------------------------------------------------
+ID       : S2/T/EN/1037
+REASON   : No supported language found
+DETECTED : [es:0.8571404453113308, tl:0.14285722813163543]
+CLAIM    : DMDK cadres say no to alliance, Vijayakant to decide later
+--------------------------------------------------
+ID       : S2/T/EN/1075
+REASON   : No supported language found
+DETECTED : [id:0.9999945242568724]
+CLAIM    : Rahul Gandhi to campaign in Koraput, Nabarangpur on April 2
+--------------------------------------------------
+ID       : S2/T/EN/1218
+REASON   : Low confidence below 0.3
+DETECTED : en:0.29
+CLAIM    : Gujarat's NID reports 24 Covid cases, declared micro containment zone
+--------------------------------------------------
+ID       : S2/T/EN/1281
+REASON   : Low confidence below 0.3
+DETECTED : en:0.14
+CLAIM    : Now, 2nd Covishield dose can be taken 8-16 weeks after 1st dose
+--------------------------------------------------
+ID       : S2/T/EN/1289
+REASON   : No supported language found
+DETECTED : [ca:0.4285707862685231, es:0.42857006745450926, pt:0.14285705346142777]
+CLAIM    : 3 Covid vaccine doses do not protect kids under 5: Pfizer
+--------------------------------------------------
+ID       : TEST
+REASON   : No supported language found
+DETECTED : [fr:0.28571421915175765, af:0.2857140141033052, no:0.28571269873950733, sq:0.14285628466854053]
+CLAIM    : Public dusre parties ko sirf promises dekh ke vote kar deti hai
+--------------------------------------------------
+ID       : TEST
+REASON   : Low confidence below 0.3
+DETECTED : en:0.14
+CLAIM    : abe international bhikhari apne baap china ko bhool gya lagta hai
+--------------------------------------------------
+ID       : TEST
+REASON   : No supported language found
+DETECTED : [tr:0.42857072356513326, sq:0.4285703257647043, da:0.1428579199209264]
+CLAIM    : plz pahle mjhe insaf dye apne hafiz muzafer kareem k khelf
+--------------------------------------------------

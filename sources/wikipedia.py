@@ -3,17 +3,12 @@ from wikipedia.exceptions import DisambiguationError, PageError
 from language.mapper import get_wiki_lang
 
 
-def fetch_from_wikipedia(claim: str, lang_code: str) -> list:
+def _fetch_wiki(claim: str, wiki_lang: str) -> list:
     """
-    Searches Wikipedia in the correct language for the claim.
+    Internal function — searches one Wikipedia language site.
     Returns list of full article texts.
     """
-
-    # get the correct wikipedia language prefix
-    # e.g. "hi" → hi.wikipedia.org
-    wiki_lang = get_wiki_lang(lang_code)
-
-    # tell wikipedia library which language site to use
+    # switch Wikipedia to correct language
     wikipedia.set_lang(wiki_lang)
 
     print(f"[WIKI] Searching {wiki_lang}.wikipedia.org for: {claim[:50]}")
@@ -32,8 +27,9 @@ def fetch_from_wikipedia(claim: str, lang_code: str) -> list:
 
         for title in search_results:
             try:
-                # fetch full article, auto_suggest=False means
-                # use exact title dont let wikipedia redirect
+                # fetch full article
+                # auto_suggest=False means use exact title
+                # dont let wikipedia redirect to different article
                 page = wikipedia.page(title, auto_suggest=False)
 
                 # skip stub articles under 100 characters
@@ -44,7 +40,7 @@ def fetch_from_wikipedia(claim: str, lang_code: str) -> list:
 
             except DisambiguationError as e:
                 # title points to multiple articles
-                # try first suggestion
+                # try first suggestion from disambiguation list
                 print(f"[WIKI] Disambiguation for '{title}' "
                       f"— trying '{e.options[0]}'")
                 try:
@@ -69,5 +65,26 @@ def fetch_from_wikipedia(claim: str, lang_code: str) -> list:
     except Exception as e:
         print(f"[WIKI] Search failed: {e}")
 
-    print(f"[WIKI] Total documents fetched: {len(documents)}")
+    print(f"[WIKI] Total documents fetched from {wiki_lang}: {len(documents)}")
     return documents
+
+
+def fetch_from_wikipedia(claim: str, lang_code: str) -> list:
+    """
+    Searches Wikipedia in the correct language for the claim.
+    For codemix claims — searches both English and Hindi Wikipedia
+    since codemix is Romanized Hindi written in English script.
+    Returns list of full article texts.
+    """
+    if lang_code == "cm":
+        # codemix → search both English and Hindi Wikipedia
+        # combines results from both for maximum coverage
+        print(f"[WIKI] Codemix claim — searching en + hi Wikipedia")
+        en_docs = _fetch_wiki(claim, "en")
+        hi_docs = _fetch_wiki(claim, "hi")
+        return en_docs + hi_docs
+
+    else:
+        # all other languages → search correct language Wikipedia
+        wiki_lang = get_wiki_lang(lang_code)
+        return _fetch_wiki(claim, wiki_lang)

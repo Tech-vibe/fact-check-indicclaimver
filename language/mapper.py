@@ -3,6 +3,7 @@ DDGO_region_map = {
     "hi" : "in-hi",
     "bn" : "in-bn",
     "mr" : "in-mr",
+    "cm" : "in-en",
 }
 
 
@@ -11,6 +12,7 @@ WIKI_lang_map = {
     "hi" : "hi",
     "bn" : "bn",
     "mr" : "mr",
+    "cm" : "en",
 }
 
 

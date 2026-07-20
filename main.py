@@ -74,6 +74,25 @@ def process_claim(item: dict, force_lang: str = None) -> dict:
     all_docs  = wiki_docs + web_docs
     documents = clean_documents(all_docs)
 
+    # if no documents found — retry with shorter claim
+    # long specific headlines often fail
+    # shorter keywords work better
+    if len(documents) == 0:
+        print(f"[MAIN] ID:{claim_id} — No documents found. "
+            f"Retrying with keywords...")
+
+        # take first 5 words as simplified query
+        keywords = " ".join(claim_text.split()[:5])
+        print(f"[MAIN] Retry query: {keywords}")
+
+        wiki_retry = fetch_from_wikipedia(keywords, lang_code)
+        web_retry  = fetch_from_web(keywords, lang_code)
+
+        all_retry  = wiki_retry + web_retry
+        documents  = clean_documents(all_retry)
+
+        print(f"[MAIN] ID:{claim_id} — Retry document count: {len(documents)}")
+
     print(f"[MAIN] ID:{claim_id} — Final document count: {len(documents)}")
 
     return {

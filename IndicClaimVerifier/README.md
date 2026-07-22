@@ -54,6 +54,7 @@ cd IndicClaimVerifier
 
 Download the GGUF model weights file and place it inside the `models/` directory:
 
+- **Download Link**: [Hugging Face - Qwen3-8B GGUF](https://huggingface.co/models?search=Qwen3-8B-GGUF) (Download `Qwen3-8B-Q4_K_M.gguf`)
 - **Model File**: `Qwen3-8B-Q4_K_M.gguf`
 - **Destination Path**: `IndicClaimVerifier/models/Qwen3-8B-Q4_K_M.gguf`
 

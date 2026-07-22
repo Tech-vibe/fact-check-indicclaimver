@@ -56,59 +56,74 @@ def is_relevant(result: dict, keywords: list) -> bool:
 
 def fetch_page_text(url: str) -> str:
     """
-    Fetches full text content from a given URL.
-    Removes HTML tags and returns clean readable text.
+    Fetches main article content from a URL.
+    Targets title and body content only.
+    Ignores subscribe prompts, ads, nav menus.
     """
     try:
-        # some websites block bots
-        # adding a User-Agent header makes us look like a real browser
         headers = {"User-Agent": "Mozilla/5.0"}
-
-        # fetch the page — timeout=10 means
-        # if page takes more than 10 seconds give up
         response = requests.get(url, timeout=10, headers=headers)
 
-        # 200 means success
-        # anything else means something went wrong
         if response.status_code != 200:
             print(f"[WEB] Failed to fetch {url[:60]} "
                   f"— status: {response.status_code}")
             return ""
-        
 
-        # detect PDF by content type header
+        # detect and skip PDFs
         content_type = response.headers.get("Content-Type", "")
         if "pdf" in content_type.lower() or url.lower().endswith(".pdf"):
             print(f"[WEB] Skipping PDF: {url[:60]}")
             return ""
 
-        # detect PDF by checking first 4 bytes of content
         if response.content[:4] == b"%PDF":
             print(f"[WEB] Skipping PDF content: {url[:60]}")
             return ""
 
-        # parse the raw HTML using BeautifulSoup
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # remove all junk tags that aren't readable content
-        # script → javascript code
-        # style  → css styling
-        # nav    → navigation menus
-        # footer → page footer
-        # header → page header
-        # aside  → sidebars
-        for tag in soup(["script", "style", "nav",
-                         "footer", "header", "aside"]):
-            tag.decompose()   # decompose = delete this tag completely
+        # remove all junk tags first
+        for tag in soup(["script", "style", "nav", "footer",
+                         "header", "aside", "form", "button",
+                         "iframe", "advertisement"]):
+            tag.decompose()
 
-        # extract all remaining text
-        # separator=" " puts a space between each text block
-        # strip=True removes extra whitespace
+        # strategy 1 — look for <article> tag first
+        # most news sites wrap content in <article>
+        article = soup.find("article")
+        if article:
+            text = article.get_text(separator=" ", strip=True)
+            if len(text) > 200:
+                print(f"[WEB] Extracted from <article> tag")
+                return text[:50000]
+
+        # strategy 2 — look for <main> tag
+        main = soup.find("main")
+        if main:
+            text = main.get_text(separator=" ", strip=True)
+            if len(text) > 200:
+                print(f"[WEB] Extracted from <main> tag")
+                return text[:50000]
+
+        # strategy 3 — extract only paragraphs and headings
+        # this skips subscribe buttons, ads, nav text
+        content_tags = soup.find_all(["h1", "h2", "h3", "p"])
+        if content_tags:
+            text = " ".join(
+                tag.get_text(strip=True)
+                for tag in content_tags
+                if len(tag.get_text(strip=True)) > 30
+                # skip very short tags like "Subscribe" or "Home"
+            )
+            if len(text) > 200:
+                print(f"[WEB] Extracted from <p> and headings")
+                return text[:50000]
+
+        # strategy 4 — fallback to full page if nothing else works
         text = soup.get_text(separator=" ", strip=True)
-
-        # only return if text has meaningful content
         if len(text) > 100:
-            return text
+            print(f"[WEB] Fallback to full page text")
+            return text[:50000]
+
         return ""
 
     except Exception as e:

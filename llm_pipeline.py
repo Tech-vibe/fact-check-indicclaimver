@@ -215,9 +215,7 @@ def load_input_json(filepath: str) -> list:
         {
             "ID":        "<string>",
             "claim":     "<string>",
-            "evidence1": "<string>",
-            "evidence2": "<string>",
-            "evidence3": "<string>"
+            "Evidence":  "<string>"
         }
 
     Returns a list of such dicts.
@@ -240,24 +238,20 @@ def load_input_json(filepath: str) -> list:
 # STEP 2 - BUILD EVIDENCE BLOCK
 # ============================================================
 
-def build_evidence_block(item: dict, max_chars_per_evidence: int = 600) -> str:
+def build_evidence_block(item: dict, max_chars_per_evidence: int = 1800) -> str:
     """
-    Concatenates Evidence1, Evidence2, Evidence3 from a claim item
-    into a single block, skipping any blank entries.
+    Extracts Evidence from a claim item into a single block.
 
-    Truncates each evidence piece to at most max_chars_per_evidence characters
+    Truncates evidence piece to at most max_chars_per_evidence characters
     to prevent prompt context window overflow and long HTTP timeouts.
 
     Field names match the topk_output.json schema (capital E).
     Returns a plain-text string ready for the prompt.
     """
     evidence_keys = [
-        ("Evidence1", "evidence1"),
-        ("Evidence2", "evidence2"),
-        ("Evidence3", "evidence3")
+        ("Evidence", "evidence")
     ]
     lines = []
-    counter = 1
 
     for k1, k2 in evidence_keys:
         val = item.get(k1) if item.get(k1) is not None else item.get(k2, "")
@@ -265,8 +259,7 @@ def build_evidence_block(item: dict, max_chars_per_evidence: int = 600) -> str:
         if value:
             if len(value) > max_chars_per_evidence:
                 value = value[:max_chars_per_evidence] + " ...[truncated for brevity]"
-            lines.append(f"Source {counter}:\n{value}")
-            counter += 1
+            lines.append(f"Source:\n{value}")
 
     if not lines:
         return "No evidence was retrieved for this claim."

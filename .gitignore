@@ -1,0 +1,25 @@
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Model files & weights (large binaries)
+models/*.gguf
+*.gguf
+
+# Output & checkpoint files
+submission.json
+submission_checkpoint.json
+
+# System & IDE logs
+*.log
+.system_generated/
+.gemini/
+
+# Compiled Binaries
+llama.cpp/build/
+*.exe
+*.dll
+.system_generated/
+.gemini/

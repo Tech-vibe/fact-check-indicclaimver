@@ -230,7 +230,7 @@ def sanitize_item(item: dict) -> dict:
 
     Fields sanitized:
         'Text'              -> up to CLAIM_MAX_CHARS characters
-        'Evidence1/2/3'     -> up to EVIDENCE_MAX_CHARS characters each
+        'Evidence'          -> up to EVIDENCE_MAX_CHARS * 3 characters
 
     Any other fields (e.g. 'ID') are copied through unchanged.
 
@@ -249,10 +249,10 @@ def sanitize_item(item: dict) -> dict:
         'Text'
     )
 
-    for k1, k2 in (('Evidence1', 'evidence1'), ('Evidence2', 'evidence2'), ('Evidence3', 'evidence3')):
+    for k1, k2 in (('Evidence', 'evidence'),):
         raw = sanitized.get(k1) if sanitized.get(k1) is not None else sanitized.get(k2, '')
         if raw:
-            sanitized[k1] = sanitize_text(raw, EVIDENCE_MAX_CHARS, k1)
+            sanitized[k1] = sanitize_text(raw, EVIDENCE_MAX_CHARS * 3, k1)
 
     return sanitized
 

@@ -235,6 +235,74 @@ def load_input_json(filepath: str) -> list:
     return data
 
 # ============================================================
+# STEP 1b - PRE-FLIGHT INPUT VALIDATION
+# ============================================================
+
+def validate_input(claims: list) -> bool:
+    """
+    Scans every record in the loaded input list BEFORE any LLM calls begin.
+
+    Checks each record for:
+    - Required fields present: ID, Text (or claim), Evidence.
+    - ID is a non-empty string.
+    - Text/claim field is non-empty.
+    - Evidence field is non-empty.
+
+    Prints a clear summary report and returns:
+        True  — all records are valid, safe to proceed.
+        False — one or more records are malformed (pipeline should abort).
+    """
+    sep = "=" * 60
+    logger.info(f"\n{sep}")
+    logger.info("PRE-FLIGHT INPUT VALIDATION")
+    logger.info(f"Scanning {len(claims)} record(s) for data quality issues...")
+    logger.info(sep)
+
+    issues_found = []
+
+    for i, item in enumerate(claims):
+        if not isinstance(item, dict):
+            issues_found.append(f"  Record [{i}] is not a JSON object (got {type(item).__name__}).")
+            continue
+
+        rec_id = str(item.get("ID", "")).strip()
+
+        # Check ID
+        if not rec_id:
+            issues_found.append(f"  Record [{i}]: Missing or empty 'ID' field.")
+
+        # Check claim text (supports both 'Text' and 'claim' key names)
+        claim_text = item.get("Text") if item.get("Text") is not None else item.get("claim", "")
+        if not str(claim_text).strip():
+            issues_found.append(
+                f"  Record [{i}] (ID='{rec_id}'): Missing or empty claim text "
+                f"(checked 'Text' and 'claim' fields)."
+            )
+
+        # Check evidence
+        evidence = item.get("Evidence") if item.get("Evidence") is not None else item.get("evidence", "")
+        if not str(evidence).strip():
+            issues_found.append(
+                f"  Record [{i}] (ID='{rec_id}'): Missing or empty 'Evidence' field."
+            )
+
+    if not issues_found:
+        logger.info(f"[PASS] All {len(claims)} input record(s) passed pre-flight validation.")
+        logger.info(sep)
+        return True
+    else:
+        logger.error(f"[FAIL] Pre-flight validation found {len(issues_found)} issue(s):")
+        for issue in issues_found:
+            logger.error(issue)
+        logger.error(sep)
+        logger.error(
+            "ACTION REQUIRED: Fix the above issues in your input file before re-running the pipeline."
+        )
+        logger.error(sep)
+        return False
+
+
+# ============================================================
 # STEP 2 - BUILD EVIDENCE BLOCK
 # ============================================================
 
@@ -1093,6 +1161,11 @@ def main() -> None:
         claims = load_input_json(INPUT_FILE)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load input file: {e}")
+        sys.exit(1)
+
+    # --- Pre-flight input validation (runs before any LLM calls) ---
+    if not validate_input(claims):
+        logger.error("Pre-flight validation failed. Aborting pipeline to avoid wasted processing.")
         sys.exit(1)
 
     # --- Resume from checkpoint if one exists ---

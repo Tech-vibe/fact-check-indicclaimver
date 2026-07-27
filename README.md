@@ -92,27 +92,84 @@ Place your `topk_output.json` file inside the `input/` directory. (If the direct
 
 ### Step 6: Run the Pipeline
 
-Simply run the automated batch script:
+The `run_pipeline.bat` script supports two modes:
 
+#### Normal Mode — Process all claims
 ```cmd
 run_pipeline.bat
 ```
 
-**What `run_pipeline.bat` does automatically:**
+#### Repair Mode — Process a single specific claim
+```cmd
+run_pipeline.bat --repair "S2/T/BN/1045"
+```
+*(Replace `S2/T/BN/1045` with the exact Claim ID you want to process)*
+
+**What `run_pipeline.bat` does automatically (in both modes):**
 1. Terminates any stale server instances on port `8080`.
 2. Launches `llama-server.exe` on GPU (`-c 8192` context size, full GPU offload `-ngl 99`, Flash Attention enabled).
 3. Waits for the model to load into GPU VRAM.
-4. Executes `llm_pipeline.py` to process all input claims.
+4. Executes `llm_pipeline.py` (with any arguments you passed).
 5. Safely shuts down the background server upon completion.
 
 ---
 
 ## 🔄 Checkpointing & Resuming Work
 
-- **Automatic Checkpointing**: Progress is saved to `submission_checkpoint.json` every **5 claims**.
+- **Automatic Checkpointing**: Progress is saved to `output/submission_checkpoint.json` every **5 claims**.
 - **Resume Support**: If the pipeline is interrupted (e.g. power loss or manual stop), simply re-run `run_pipeline.bat`. It will automatically detect existing checkpoint records and resume seamlessly from where it left off.
 
 ---
+
+## 🛡️ Pre-flight Input Validation
+
+Before sending any claims to the LLM, the pipeline automatically scans your entire input file for data quality issues. This runs in under a second and prevents hours of wasted GPU time.
+
+For each record it checks:
+- `ID` field is present and non-empty.
+- `Text` / `claim` field (the claim to verify) is non-empty.
+- `Evidence` field is non-empty.
+
+**What happens if a bad record is found:**
+- The bad record is **skipped with a warning** — the pipeline continues processing all valid records.
+- At the end of the scan, a tip is shown to use `--repair` to add the skipped claim later.
+
+Example warning output:
+```
+[WARN] Record [499] (ID='S2/1500'): Missing or empty 'Evidence' field.
+[WARN] 1 record(s) skipped. Fix them and use --repair <CLAIM_ID> to add them later.
+```
+
+---
+
+## 🔧 Repair Mode — Adding a Single Skipped Claim
+
+If a claim was skipped during the main run due to a bad input field, fix the issue in `input/topk_output.json` and then use Repair Mode to process just that one claim and add it to your existing output without re-running everything.
+
+### How to use it
+
+```cmd
+run_pipeline.bat --repair "S2/T/BN/1045"
+```
+
+### What Repair Mode does
+
+1. Starts the GPU server.
+2. Finds the claim with the given ID in `input/topk_output.json`.
+3. Validates that the claim's fields are now properly filled in.
+4. Sends it through the full LLM pipeline.
+5. Loads the existing `output/submission.json`.
+6. **Replaces** the entry in-place if the ID already exists, or **appends** it if it's new.
+7. Saves the updated output file.
+8. Re-runs the full submission validation on the complete output.
+
+### Important notes
+
+- ✅ All other records in the output file are **untouched**.
+- ✅ The checkpoint file is **never modified** by Repair Mode.
+- ✅ If the output file doesn't exist yet, it will be created.
+- ❌ If the Claim ID is not found in the input file, it will exit with a clear error.
+- ❌ If the field is still empty after your fix, it will refuse to run and tell you to fix it first.
 
 ## 📥 Input & Output JSON Schemas
 

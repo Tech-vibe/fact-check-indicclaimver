@@ -33,9 +33,11 @@ IndicClaimVerifier/
 ├── llm_pipeline.py                   # Core LLM inference & verification pipeline
 ├── run_pipeline.bat                  # One-click GPU server + pipeline execution batch script
 ├── run_server.bat                    # Standalone llama-server launcher
-├── topk_output.json                  # Input claims & retrieved evidence dataset
-├── submission.json                   # Final output predictions (generated)
-├── submission_checkpoint.json        # Automatic progress checkpoint file
+├── input/
+│   └── topk_output.json              # Input claims & retrieved evidence dataset
+├── output/
+│   ├── submission.json               # Final output predictions (generated)
+│   └── submission_checkpoint.json    # Automatic progress checkpoint file
 └── README.md                         # Documentation
 ```
 
@@ -82,7 +84,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### Step 5: Run the Pipeline
+### Step 5: Place Your Input Data
+
+Place your `topk_output.json` file inside the `input/` directory. (If the directory doesn't exist, create it).
+
+- **File Path**: `IndicClaimVerifier/input/topk_output.json`
+
+### Step 6: Run the Pipeline
 
 Simply run the automated batch script:
 
@@ -108,7 +116,7 @@ run_pipeline.bat
 
 ## 📥 Input & Output JSON Schemas
 
-### Input Format (`topk_output.json`)
+### Input Format (`input/topk_output.json`)
 
 ```json
 [
@@ -122,7 +130,7 @@ run_pipeline.bat
 ]
 ```
 
-### Output Format (`submission.json`)
+### Output Format (`output/submission.json`)
 
 ```json
 [

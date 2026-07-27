@@ -1,4 +1,5 @@
 import re
+import argparse
 import requests
 import json
 import time
@@ -238,7 +239,7 @@ def load_input_json(filepath: str) -> list:
 # STEP 1b - PRE-FLIGHT INPUT VALIDATION
 # ============================================================
 
-def validate_input(claims: list) -> bool:
+def validate_input(claims: list) -> tuple:
     """
     Scans every record in the loaded input list BEFORE any LLM calls begin.
 
@@ -248,9 +249,11 @@ def validate_input(claims: list) -> bool:
     - Text/claim field is non-empty.
     - Evidence field is non-empty.
 
-    Prints a clear summary report and returns:
-        True  — all records are valid, safe to proceed.
-        False — one or more records are malformed (pipeline should abort).
+    Returns a tuple (valid_claims, skipped_ids):
+        valid_claims — list of records that passed all checks (safe to process).
+        skipped_ids  — list of (index, id, reason) tuples for bad records.
+
+    Bad records are SKIPPED with a warning; the pipeline continues on valid ones.
     """
     sep = "=" * 60
     logger.info(f"\n{sep}")
@@ -258,48 +261,52 @@ def validate_input(claims: list) -> bool:
     logger.info(f"Scanning {len(claims)} record(s) for data quality issues...")
     logger.info(sep)
 
-    issues_found = []
+    valid_claims = []
+    skipped      = []   # list of (index, id_str, reason_str)
 
     for i, item in enumerate(claims):
         if not isinstance(item, dict):
-            issues_found.append(f"  Record [{i}] is not a JSON object (got {type(item).__name__}).")
+            reason = f"Record [{i}] is not a JSON object (got {type(item).__name__})."
+            logger.warning(f"  [SKIP] {reason}")
+            skipped.append((i, "<non-dict>", reason))
             continue
 
         rec_id = str(item.get("ID", "")).strip()
+        item_issues = []
 
         # Check ID
         if not rec_id:
-            issues_found.append(f"  Record [{i}]: Missing or empty 'ID' field.")
+            item_issues.append("Missing or empty 'ID' field.")
 
         # Check claim text (supports both 'Text' and 'claim' key names)
         claim_text = item.get("Text") if item.get("Text") is not None else item.get("claim", "")
         if not str(claim_text).strip():
-            issues_found.append(
-                f"  Record [{i}] (ID='{rec_id}'): Missing or empty claim text "
-                f"(checked 'Text' and 'claim' fields)."
-            )
+            item_issues.append("Missing or empty claim text ('Text'/'claim' field).")
 
         # Check evidence
         evidence = item.get("Evidence") if item.get("Evidence") is not None else item.get("evidence", "")
         if not str(evidence).strip():
-            issues_found.append(
-                f"  Record [{i}] (ID='{rec_id}'): Missing or empty 'Evidence' field."
-            )
+            item_issues.append("Missing or empty 'Evidence' field.")
 
-    if not issues_found:
+        if item_issues:
+            reason = " | ".join(item_issues)
+            logger.warning(f"  [SKIP] Record [{i}] (ID='{rec_id}'): {reason}")
+            skipped.append((i, rec_id, reason))
+        else:
+            valid_claims.append(item)
+
+    if not skipped:
         logger.info(f"[PASS] All {len(claims)} input record(s) passed pre-flight validation.")
-        logger.info(sep)
-        return True
     else:
-        logger.error(f"[FAIL] Pre-flight validation found {len(issues_found)} issue(s):")
-        for issue in issues_found:
-            logger.error(issue)
-        logger.error(sep)
-        logger.error(
-            "ACTION REQUIRED: Fix the above issues in your input file before re-running the pipeline."
+        logger.warning(
+            f"[WARN] {len(skipped)} record(s) skipped due to data issues. "
+            f"{len(valid_claims)} valid record(s) will be processed."
         )
-        logger.error(sep)
-        return False
+        logger.warning(
+            "TIP: Use --repair <CLAIM_ID> after fixing the input file to add missing results."
+        )
+    logger.info(sep)
+    return valid_claims, skipped
 
 
 # ============================================================
@@ -1086,6 +1093,128 @@ def _print_summary(issues: list) -> bool:
         return False
 
 # ============================================================
+# REPAIR MODE  — process a single claim by ID and patch output
+# ============================================================
+
+def run_repair_mode(claim_id: str) -> None:
+    """
+    Repair Mode: process ONE specific claim by its ID and upsert the result
+    into the existing output file without touching any other records.
+
+    Workflow:
+        1. Check LLM server is reachable.
+        2. Load input file and locate the claim with matching ID.
+        3. Validate that specific claim has the required fields.
+        4. Run it through the full LLM pipeline.
+        5. Load the existing output file (or start with an empty list).
+        6. Replace the matching ID entry in-place, or append if not found.
+        7. Save the patched output file.
+        8. Re-run submission validation on the whole output file.
+    """
+    sep = "=" * 60
+    logger.info(sep)
+    logger.info(f"REPAIR MODE: Processing single claim ID: '{claim_id}'")
+    logger.info(sep)
+
+    # Step 1 — Server check
+    logger.info("Checking LLM server connectivity...")
+    if not check_server_reachable():
+        logger.error("LLM server is not reachable. Start llama-server first.")
+        sys.exit(1)
+    logger.info("LLM server is reachable. Proceeding...")
+
+    # Step 2 — Load input and find the claim
+    try:
+        all_claims = load_input_json(INPUT_FILE)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        logger.error(f"Failed to load input file: {e}")
+        sys.exit(1)
+
+    target = next(
+        (c for c in all_claims if str(c.get("ID", "")).strip() == claim_id.strip()),
+        None
+    )
+    if target is None:
+        logger.error(f"Claim ID '{claim_id}' was NOT found in the input file: {INPUT_FILE}")
+        logger.error("Check the ID spelling and try again.")
+        sys.exit(1)
+
+    logger.info(f"Found claim ID '{claim_id}' in input file. Validating fields...")
+
+    # Step 3 — Validate this specific claim before sending to LLM
+    claim_text = target.get("Text") if target.get("Text") is not None else target.get("claim", "")
+    evidence   = target.get("Evidence") if target.get("Evidence") is not None else target.get("evidence", "")
+    field_ok = True
+    if not str(claim_text).strip():
+        logger.error(f"Claim ID '{claim_id}': 'Text'/'claim' field is still empty. Fix the input file first.")
+        field_ok = False
+    if not str(evidence).strip():
+        logger.error(f"Claim ID '{claim_id}': 'Evidence' field is still empty. Fix the input file first.")
+        field_ok = False
+    if not field_ok:
+        sys.exit(1)
+
+    logger.info("Claim fields look good. Sending to LLM...")
+
+    # Step 4 — Process through LLM
+    new_result = process_claim(target)
+    if new_result.get("Prediction") == "ERROR":
+        logger.error(
+            f"LLM processing failed for claim ID '{claim_id}': "
+            f"{new_result.get('Justification', '')}"
+        )
+        sys.exit(1)
+
+    logger.info(f"LLM produced result: Prediction = {new_result['Prediction']}")
+
+    # Step 5 — Load existing output file (or start fresh)
+    output_path = Path(OUTPUT_FILE)
+    if output_path.exists():
+        try:
+            with open(output_path, "r", encoding="utf-8") as f:
+                existing_results = json.load(f)
+            if not isinstance(existing_results, list):
+                logger.warning("Existing output file is not a list. Starting with a fresh list.")
+                existing_results = []
+            logger.info(f"Loaded {len(existing_results)} existing record(s) from output file.")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Could not read existing output file ({e}). Starting with empty list.")
+            existing_results = []
+    else:
+        logger.info("Output file does not exist yet. A new one will be created.")
+        existing_results = []
+
+    # Step 6 — Upsert: replace in-place if ID exists, otherwise append
+    found_in_output = False
+    for idx, rec in enumerate(existing_results):
+        if isinstance(rec, dict) and str(rec.get("ID", "")).strip() == claim_id.strip():
+            logger.info(
+                f"Replacing existing entry for ID '{claim_id}' at position [{idx}] in output."
+            )
+            existing_results[idx] = new_result
+            found_in_output = True
+            break
+
+    if not found_in_output:
+        logger.info(
+            f"ID '{claim_id}' not found in existing output. Appending as a new record."
+        )
+        existing_results.append(new_result)
+
+    # Step 7 — Save the patched output
+    save_output_json(existing_results, OUTPUT_FILE)
+    logger.info(f"Output file updated successfully: {OUTPUT_FILE}")
+
+    # Step 8 — Re-run submission validation on the whole file
+    all_input_claims = all_claims   # Use all input claims for ID completeness check
+    validate_submission(OUTPUT_FILE, all_input_claims)
+
+    logger.info(sep)
+    logger.info(f"REPAIR MODE COMPLETE: Claim ID '{claim_id}' has been added to the output.")
+    logger.info(sep)
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -1129,12 +1258,31 @@ def check_server_reachable() -> bool:
 def main() -> None:
     """
     Entry point:
-        1. Check that the LLM server is reachable.
-        2. Load the top-k retrieval output JSON.
-        3. Process each claim through the LLM pipeline.
-        4. Save the results to the output JSON file.
-        5. Validate the submission file against competition rules.
+        Normal mode : Processes all claims in the input file.
+        Repair mode : --repair <CLAIM_ID>  processes one specific claim
+                      and patches it into the existing output file.
     """
+    parser = argparse.ArgumentParser(
+        description="IndicClaimVerifier — Multilingual LLM Fact Verification Pipeline"
+    )
+    parser.add_argument(
+        "--repair",
+        metavar="CLAIM_ID",
+        default=None,
+        help=(
+            "Repair mode: process a single claim by its ID and upsert the result "
+            "into the existing output file without affecting other records. "
+            "Example: --repair S2/1045"
+        )
+    )
+    args = parser.parse_args()
+
+    # ---- REPAIR MODE ----
+    if args.repair:
+        run_repair_mode(args.repair)
+        return
+
+    # ---- NORMAL MODE ----
     logger.info("=" * 60)
     logger.info("IndicClaimVerifier - LLM Fact Verification Pipeline")
     logger.info("=" * 60)
@@ -1163,10 +1311,13 @@ def main() -> None:
         logger.error(f"Failed to load input file: {e}")
         sys.exit(1)
 
-    # --- Pre-flight input validation (runs before any LLM calls) ---
-    if not validate_input(claims):
-        logger.error("Pre-flight validation failed. Aborting pipeline to avoid wasted processing.")
-        sys.exit(1)
+    # --- Pre-flight input validation (warns + skips bad records, does NOT abort) ---
+    claims, skipped = validate_input(claims)
+    if skipped:
+        logger.warning(
+            f"[WARN] {len(skipped)} record(s) were skipped. "
+            "Fix them in the input file and use --repair <CLAIM_ID> to add them later."
+        )
 
     # --- Resume from checkpoint if one exists ---
     raw_results      = load_checkpoint(CHECKPOINT_FILE)

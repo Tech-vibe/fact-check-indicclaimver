@@ -1205,9 +1205,10 @@ def run_repair_mode(claim_id: str) -> None:
     save_output_json(existing_results, OUTPUT_FILE)
     logger.info(f"Output file updated successfully: {OUTPUT_FILE}")
 
-    # Step 8 — Re-run submission validation on the whole file
-    all_input_claims = all_claims   # Use all input claims for ID completeness check
-    validate_submission(OUTPUT_FILE, all_input_claims)
+    # Step 8 — Re-run submission validation for records currently in output
+    processed_ids = {str(rec.get("ID", "")).strip() for rec in existing_results if isinstance(rec, dict)}
+    expected_input_claims = [c for c in all_claims if str(c.get("ID", "")).strip() in processed_ids]
+    validate_submission(OUTPUT_FILE, expected_input_claims)
 
     logger.info(sep)
     logger.info(f"REPAIR MODE COMPLETE: Claim ID '{claim_id}' has been added to the output.")

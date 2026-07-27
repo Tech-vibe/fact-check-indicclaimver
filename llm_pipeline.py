@@ -39,9 +39,9 @@ logger = logging.getLogger(__name__)
 SERVER_URL   = "http://127.0.0.1:8080/v1/chat/completions"
 MODEL_NAME = "Qwen3-8B-Q4_K_M.gguf"
 
-INPUT_FILE       = r"D:\IndicClaimVerifier\topk_output.json"
-OUTPUT_FILE      = r"D:\IndicClaimVerifier\submission.json"
-CHECKPOINT_FILE  = r"D:\IndicClaimVerifier\submission_checkpoint.json"
+INPUT_FILE       = r"D:\IndicClaimVerifier\input\topk_output.json"
+OUTPUT_FILE      = r"D:\IndicClaimVerifier\output\submission.json"
+CHECKPOINT_FILE  = r"D:\IndicClaimVerifier\output\submission_checkpoint.json"
 CHECKPOINT_EVERY = 5    # Save progress to disk every 5 claims
 
 # LLM generation parameters

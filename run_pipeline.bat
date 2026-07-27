@@ -1,6 +1,19 @@
 @echo off
+setlocal
+
+:: Check if --repair argument was passed
+set "MODE=NORMAL"
+set "REPAIR_ID="
+for %%A in (%*) do (
+    if /I "%%A"=="--repair" set "MODE=REPAIR"
+)
+
 echo ===================================================
-echo  Starting IndicClaimVerifier GPU Pipeline
+if "%MODE%"=="REPAIR" (
+    echo  IndicClaimVerifier - REPAIR MODE
+) else (
+    echo  Starting IndicClaimVerifier GPU Pipeline
+)
 echo ===================================================
 
 :: 1. Kill any existing llama-server to prevent port 8080 conflicts
@@ -14,15 +27,22 @@ start /B "" ".\llama.cpp\build\bin\Release\llama-server.exe" -m ".\models\Qwen3-
 echo Waiting for GPU server to initialize...
 timeout /t 12 /nobreak > nul
 
-:: 4. Run the python pipeline using the virtual environment
-echo Running verification pipeline...
-call .venv\Scripts\python.exe llm_pipeline.py
+:: 4. Run the python pipeline, passing through all arguments (%*)
+::    Normal mode : run_pipeline.bat
+::    Repair mode : run_pipeline.bat --repair "S2/T/BN/1045"
+echo Running pipeline with args: %*
+call .venv\Scripts\python.exe llm_pipeline.py %*
 
 :: 5. Clean up the server process once python finishes
-echo Shutdown background server...
+echo Shutting down background server...
 taskkill /IM llama-server.exe /F >nul 2>&1
 
 echo ===================================================
-echo  Pipeline execution complete!
+if "%MODE%"=="REPAIR" (
+    echo  Repair complete!
+) else (
+    echo  Pipeline execution complete!
+)
 echo ===================================================
 pause
+endlocal

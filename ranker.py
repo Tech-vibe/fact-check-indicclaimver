@@ -3,7 +3,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import json
-import re  # <--- ADDED: Required for splitting sentences
+import re
 from FlagEmbedding import FlagReranker
 
 import torch
@@ -19,13 +19,10 @@ def extract_first_n_sentences(text, n=10):
     if not text or not isinstance(text, str):
         return ""
     
-    # Clean up excess whitespace and newlines first
-    text = re.sub(r'\s+', ' ', text)
-    
     # Split on English (.!?) and Indic (।|) punctuation, keeping the punctuation attached
     sentences = re.split(r'(?<=[.!?|।])\s+', text.strip())
     
-    # Remove empty strings
+    # Remove empty strings caused by multiple spaces
     sentences = [s.strip() for s in sentences if s.strip()]
     
     # Take only the first N sentences and join them back into a single string
@@ -71,7 +68,7 @@ print("Model loaded successfully!")
 # STEP 2: Read Batch JSON Input File
 # --------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(SCRIPT_DIR, "input", "hindi_output_final.json")
+INPUT_FILE = os.path.join(SCRIPT_DIR, "input", "retrived_eng.json")
 OUTPUT_FILE = os.path.join(SCRIPT_DIR, "output", "ranked_documents.json")
 
 with open(INPUT_FILE, "r", encoding="utf-8") as f:
@@ -126,7 +123,7 @@ for index, item in enumerate(claims_list, start=1):
     # Sort documents by score descending (highest relevance first)
     scored_docs.sort(key=lambda x: x["score"], reverse=True)
     
-    # --- ADDED: THE 10-SENTENCE EXTRACTION FIX ---
+    # --- THE 10-SENTENCE FIX ---
     # Extract ONLY the first 10 sentences from the Top-K items
     top_evidence_texts = []
     for doc in scored_docs[:TOP_K]:

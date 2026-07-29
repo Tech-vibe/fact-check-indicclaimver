@@ -10,6 +10,9 @@ SKIP_DOMAINS = [
     "youtube.com", "youtu.be",
     "facebook.com", "instagram.com",
     "twitter.com", "x.com", "tiktok.com",
+    "pornworld", "xvideos", "xnxx", "pornhub",
+    "redtube", "youporn", "xhamster", "brazzers",
+    "onlyfans", "stripchat", "chaturbate",
 ]
 
 # max characters kept per fetched document — avoids huge PDFs/pages
@@ -216,3 +219,5 @@ def fetch_from_web(claim: str, lang_code: str) -> list:
 
     print(f"[WEB] Total documents fetched: {len(documents)}")
     return documents
+
+

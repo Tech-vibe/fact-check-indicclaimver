@@ -52,12 +52,33 @@ def deduplicate_documents(documents: list) -> list:
     return unique_documents
 
 
+
+
+ADULT_KEYWORDS = [
+    "porn", "xxx", "nude", "naked", "sex video",
+    "chudai", "adult content", "18+",
+]
+
+def is_adult_content(text: str) -> bool:
+    """
+    Returns True if document contains adult content.
+    """
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in ADULT_KEYWORDS)
+
 def clean_documents(documents: list) -> list:
     """
     Entry point: cleans each document then deduplicates.
+    Filters out adult content.
     """
-    # clean each document first
-    cleaned = [clean_text(doc) for doc in documents if doc.strip()]
+    # filter adult content first
+    filtered = [doc for doc in documents if not is_adult_content(doc)]
 
-    # then remove duplicates
+    if len(filtered) < len(documents):
+        print(f"[CLEAN] Filtered {len(documents) - len(filtered)} adult content documents")
+
+    # clean each document
+    cleaned = [clean_text(doc) for doc in filtered if doc.strip()]
+
+    # deduplicate
     return deduplicate_documents(cleaned)

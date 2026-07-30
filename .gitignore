@@ -21,5 +21,12 @@ submission_checkpoint.json
 llama.cpp/build/
 *.exe
 *.dll
-.system_generated/
-.gemini/
+
+# Scratch scripts & temporary test datasets
+scratch_*.py
+integration_test_tmp.py
+input/*_input.json
+input/ranked_*.json
+output/submission_*.json
+output/topk_*.json
+

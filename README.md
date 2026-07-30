@@ -31,6 +31,22 @@ Indic_Claim_Ver/
 
 ---
 
+## 💻 Prerequisites & Setup
+
+### 1. PyTorch CUDA Installation (For GPU Acceleration)
+For system GPUs (RTX 4050, RTX 3000/4000 series, A100, H100, etc.):
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+### 2. Module Requirements Installation
+```bash
+pip install -r requirements.txt
+```
+
+---
+
 ## ⚙️ Module Usage & Pre-Defined Paths
 
 ### Defined Input & Output Locations Inside `main.py`:

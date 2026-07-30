@@ -41,25 +41,13 @@ logger = logging.getLogger(__name__)
 SERVER_URL   = "http://127.0.0.1:8080/v1/chat/completions"
 MODEL_NAME = "Qwen3-8B-IQ4_XS.gguf"
 
-# Base directory of the module script
+# Base directory of the LLM module script
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PARENT_DIR = _SCRIPT_DIR.parent
 
-# Parent pipeline paths (Indic_Claim_ver/Output/...)
-_PARENT_INPUT  = _PARENT_DIR / "Output" / "Ranker_Output" / "topk_Output.json"
-_PARENT_OUTPUT = _PARENT_DIR / "Output" / "LLM_Output" / "Submission.json"
-
-# Local module fallback paths (for running inside LLM/ directory)
-_LOCAL_INPUT  = _SCRIPT_DIR / "input" / "topk_output.json"
-_LOCAL_OUTPUT = _SCRIPT_DIR / "output" / "submission.json"
-
-# Auto-select default input/output paths based on environment structure
-if (_PARENT_DIR / "Output").exists() or _PARENT_INPUT.exists():
-    INPUT_FILE  = str(_PARENT_INPUT)
-    OUTPUT_FILE = str(_PARENT_OUTPUT)
-else:
-    INPUT_FILE  = str(_LOCAL_INPUT)
-    OUTPUT_FILE = str(_LOCAL_OUTPUT)
+# Master Integration Paths (Indic_Claim_ver/Output/...)
+INPUT_FILE  = str(_PARENT_DIR / "Output" / "Ranker_Output" / "topk_Output.json")
+OUTPUT_FILE = str(_PARENT_DIR / "Output" / "LLM_Output" / "Submission.json")
 
 CHECKPOINT_EVERY = 5    # Save progress to disk every 5 claims
 

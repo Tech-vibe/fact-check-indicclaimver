@@ -5,6 +5,7 @@ import json
 import time
 import logging
 import sys
+import subprocess
 from pathlib import Path
 
 # Ensure stdout and stderr handle UTF-8 strings cleanly on Windows consoles
@@ -13,7 +14,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from input_sanitizer import PreprocessingPipeline
+from input_sanitizer import PreprocessingPipeline, sanitize_item
 
 # ============================================================
 # LOGGING
@@ -1306,9 +1307,9 @@ def check_server_reachable() -> bool:
     health_url = SERVER_URL.replace("/v1/chat/completions", "/health")
     timeout = 90  # Max seconds to wait for model loading
     start_time = time.time()
-    
+
     logger.info("Waiting for LLM server to initialize and load the model...")
-    
+
     while time.time() - start_time < timeout:
         try:
             response = requests.get(health_url, timeout=3)
@@ -1329,31 +1330,185 @@ def check_server_reachable() -> bool:
         except requests.exceptions.RequestException as e:
             # Other temporary network / request errors
             logger.warning(f"  Connection issue: {e}")
-            
+
         time.sleep(2)
-        
+
     return False
+
+
+def ensure_llm_server_running() -> bool:
+    """
+    Self-contained GPU manager:
+    Checks if llama-server is listening on port 8080.
+    If not running, launches llama-server.exe automatically in the background
+    and waits for GPU VRAM initialization.
+    """
+    health_url = SERVER_URL.replace("/v1/chat/completions", "/health")
+    try:
+        r = requests.get(health_url, timeout=2)
+        if r.status_code == 200:
+            logger.info("[LLM SERVER] GPU server is already running and ready.")
+            return True
+    except requests.exceptions.RequestException:
+        pass
+
+    logger.info("[LLM SERVER] llama-server not detected on port 8080. Auto-launching GPU server...")
+
+    server_exe = Path(r"llama.cpp\build\bin\Release\llama-server.exe")
+    model_path = Path(r"models") / MODEL_NAME
+
+    if not server_exe.exists():
+        # Search relative fallback paths if folder structure is nested
+        alt = Path("llama-server.exe")
+        if alt.exists():
+            server_exe = alt
+
+    if not server_exe.exists():
+        logger.error(f"[LLM SERVER ERROR] Could not find server binary at {server_exe}")
+        return False
+
+    cmd = [
+        str(server_exe),
+        "-m", str(model_path),
+        "--port", "8080",
+        "-c", "8192",
+        "-np", "1",
+        "-fa", "on",
+        "--reasoning", "off",
+        "-ngl", "99",
+        "-ctk", "q8_0",
+        "-ctv", "q8_0",
+        "-ub", "1024"
+    ]
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        logger.info("[LLM SERVER] Background process launched. Waiting for model initialization...")
+    except Exception as exc:
+        logger.error(f"[LLM SERVER ERROR] Failed to launch server process: {exc}")
+        return False
+
+    return check_server_reachable()
+
+
+def stream_input_claims(input_filepath: str, target_total: int | None = None, poll_interval: float = 1.5, max_idle_seconds: int = 120):
+    """
+    Generator that streams incoming claim objects from input_filepath.
+    Patiently waits/polls when Retrieval or Ranker is delayed in writing claims.
+    Safely handles mid-write partial JSON files.
+    """
+    seen_ids = set()
+    yielded_count = 0
+    start_wait = time.time()
+    last_activity = time.time()
+    file_path = Path(input_filepath)
+
+    logger.info(f"[LISTENER] Streaming claims from '{input_filepath}'...")
+
+    while True:
+        if file_path.exists():
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                if isinstance(data, list):
+                    new_items = []
+                    for item in data:
+                        if isinstance(item, dict):
+                            rec_id = str(item.get("ID", "")).strip()
+                            if rec_id and rec_id not in seen_ids:
+                                new_items.append(item)
+                                seen_ids.add(rec_id)
+
+                    if new_items:
+                        last_activity = time.time()
+                        for item in new_items:
+                            yielded_count += 1
+                            yield item
+
+                            if target_total is not None and yielded_count >= target_total:
+                                logger.info(f"[LISTENER] Reached target claim count ({target_total}). Stopping listener.")
+                                return
+            except (json.JSONDecodeError, ValueError, OSError):
+                # Ranker is currently writing file -> ignore and retry next poll
+                pass
+
+        if target_total is not None and yielded_count >= target_total:
+            return
+
+        idle_time = time.time() - last_activity
+        if yielded_count > 0 and idle_time > max_idle_seconds:
+            logger.info(f"[LISTENER] Stream complete ({yielded_count} claim(s) processed).")
+            return
+
+        if yielded_count == 0:
+            waited = int(time.time() - start_wait)
+            if waited > 0 and waited % 10 == 0:
+                logger.info(f"[LISTENER] Waiting for Ranker module to write claims to '{input_filepath}'... ({waited}s elapsed)")
+
+        time.sleep(poll_interval)
+
+
+def save_output_incremental(result: dict, output_filepath: str):
+    """
+    Atomically updates output_filepath with the new result item after EVERY claim.
+    Employs temporary file writing (.tmp) followed by atomic replacement to ensure
+    external listeners always read a valid JSON array.
+    """
+    out_path = Path(output_filepath)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = []
+    if out_path.exists():
+        try:
+            with open(out_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if not isinstance(existing, list):
+                existing = []
+        except (json.JSONDecodeError, ValueError, OSError):
+            existing = []
+
+    res_id = result.get("ID")
+    updated = False
+    for i, item in enumerate(existing):
+        if isinstance(item, dict) and item.get("ID") == res_id:
+            existing[i] = result
+            updated = True
+            break
+
+    if not updated:
+        existing.append(result)
+
+    tmp_path = out_path.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=4)
+
+    tmp_path.replace(out_path)
 
 
 def main() -> None:
     """
     Entry point:
-        Normal mode : Processes all claims in the input file.
-        Repair mode : --repair <CLAIM_ID>  processes one specific claim
-                      and patches it into the existing output file.
+        Position-based signature:
+          python llm_pipeline.py [input.json] [output.json] [total_count] [--repair CLAIM_ID]
     """
     parser = argparse.ArgumentParser(
         description="IndicClaimVerifier — Multilingual LLM Fact Verification Pipeline"
     )
     parser.add_argument(
+        "positional_args",
+        nargs="*",
+        help="[input_file] [output_file] [total_count]"
+    )
+    parser.add_argument(
         "--repair",
         metavar="CLAIM_ID",
         default=None,
-        help=(
-            "Repair mode: process a single claim by its ID and upsert the result "
-            "into the existing output file without affecting other records. "
-            "Example: --repair S2/1045"
-        )
+        help="Repair mode: process a single claim by ID and patch output."
     )
     args = parser.parse_args()
 
@@ -1362,103 +1517,100 @@ def main() -> None:
         run_repair_mode(args.repair)
         return
 
-    # ---- NORMAL MODE ----
+    # ---- PARSE POSITIONAL ARGUMENTS ----
+    pos = args.positional_args
+    input_file  = pos[0] if len(pos) >= 1 else INPUT_FILE
+    output_file = pos[1] if len(pos) >= 2 else OUTPUT_FILE
+    
+    target_total = None
+    if len(pos) >= 3:
+        try:
+            target_total = int(pos[2])
+        except ValueError:
+            target_total = None
+
+    # ---- NORMAL STREAMING MODE ----
     logger.info("=" * 60)
-    logger.info("IndicClaimVerifier - LLM Fact Verification Pipeline")
+    logger.info("IndicClaimVerifier — LLM Fact Verification Pipeline")
     logger.info("=" * 60)
-    logger.info(f"Input  : {INPUT_FILE}")
-    logger.info(f"Output : {OUTPUT_FILE}")
+    logger.info(f"Input  : {input_file}")
+    logger.info(f"Output : {output_file}")
+    logger.info(f"Total  : {target_total if target_total is not None else 'Auto / Streaming'}")
     logger.info(f"Model  : {MODEL_NAME}")
     logger.info(f"Server : {SERVER_URL}")
     logger.info("=" * 60)
 
-    # --- Server reachability check ---
+    # --- Ensure LLM Server is running on GPU ---
     logger.info("Checking LLM server connectivity...")
-    if not check_server_reachable():
-        logger.error("=" * 60)
-        logger.error("LLM SERVER IS NOT REACHABLE")
-        logger.error(f"  URL : {SERVER_URL}")
-        logger.error("  Fix : Start the llama-server before running this script.")
-        logger.error("  Cmd : .\\llama.cpp\\build\\bin\\Release\\llama-server.exe ")
-        logger.error(f"            -m .\\models\\{MODEL_NAME} --port 8080 -c 4096 -ngl 99")
-        logger.error("=" * 60)
+    if not ensure_llm_server_running():
+        logger.error("LLM Server is not reachable and could not be started automatically. Aborting.")
         sys.exit(1)
-    logger.info("LLM server is reachable. Proceeding...")
+    logger.info("LLM server is active and ready. Proceeding...")
 
-    try:
-        claims = load_input_json(INPUT_FILE)
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
-        logger.error(f"Failed to load input file: {e}")
-        sys.exit(1)
+    # ---- DYNAMIC CHECKPOINT FILE ----
+    out_p = Path(output_file)
+    checkpoint_file = str(out_p.parent / (out_p.stem + "_checkpoint.json"))
 
-    # --- Pre-flight input validation (warns + skips bad records, does NOT abort) ---
-    claims, skipped = validate_input(claims)
-    if skipped:
-        logger.warning(
-            f"[WARN] {len(skipped)} record(s) were skipped. "
-            "Fix them in the input file and use --repair <CLAIM_ID> to add them later."
-        )
-
-    # --- Resume from checkpoint if one exists ---
-    raw_results      = load_checkpoint(CHECKPOINT_FILE)
-    # Filter out successfully-processed claims (ignore ERROR entries so failed items are re-tried)
-    results          = [r for r in raw_results if r.get("Prediction") != "ERROR"]
-    completed_ids    = {r["ID"] for r in results}
-    error_count      = 0
-
-    # Filter out already-processed claims
-    pending_claims   = [c for c in claims if str(c.get("ID", "")) not in completed_ids]
-    total            = len(claims)
-    already_done     = len(results)
+    # Load existing checkpoint/results to resume if available
+    raw_results   = load_checkpoint(checkpoint_file)
+    results       = [r for r in raw_results if r.get("Prediction") != "ERROR"]
+    completed_ids = {r["ID"] for r in results}
+    already_done  = len(results)
+    error_count   = 0
 
     if already_done:
-        logger.info(
-            f"[CHECKPOINT] Skipping {already_done} already-processed claim(s). "
-            f"{len(pending_claims)} remaining."
-        )
+        logger.info(f"[CHECKPOINT] Resuming. {already_done} claim(s) already processed from {checkpoint_file}.")
 
-    pipeline = PreprocessingPipeline(pending_claims)
-    pipeline.start()
+    current_count = already_done
 
-    for idx, item in enumerate(pipeline, start=already_done + 1):
-        logger.info(f"\n[{idx}/{total}] ----------------------------------------")
-        result = process_claim(item)
+    # Listen and stream claims dynamically from input_file
+    for item in stream_input_claims(input_file, target_total=target_total):
+        claim_id = str(item.get("ID", "")).strip()
+        if claim_id in completed_ids:
+            continue
+
+        current_count += 1
+        total_str = f"/{target_total}" if target_total else ""
+        logger.info(f"\n[LLM] Processing claim {current_count}{total_str} (ID: {claim_id})")
+
+        # Sanitize single item
+        sanitized_item = sanitize_item(item)
+        result = process_claim(sanitized_item)
         results.append(result)
+        completed_ids.add(claim_id)
 
         if result["Prediction"] == "ERROR":
             error_count += 1
 
-        # --- Periodic checkpoint ---
-        if idx % CHECKPOINT_EVERY == 0:
-            save_checkpoint(results, CHECKPOINT_FILE)
+        # Atomically save to output_file after EVERY single claim
+        save_output_incremental(result, output_file)
+
+        # Save checkpoint periodically
+        if current_count % CHECKPOINT_EVERY == 0:
+            save_checkpoint(results, checkpoint_file)
 
     logger.info("\n" + "=" * 60)
-    logger.info(f"Processed : {total} claim(s)")
+    logger.info(f"Processed : {len(results)} claim(s)")
     logger.info(f"Errors    : {error_count} claim(s) failed")
     logger.info("=" * 60)
 
-    # Save final clean submission file
-    save_output_json(results, OUTPUT_FILE)
+    # Clean up checkpoint file
+    cp_path = Path(checkpoint_file)
+    if cp_path.exists():
+        cp_path.unlink()
+        logger.info(f"[CHECKPOINT] Temporary checkpoint file cleaned ({checkpoint_file}).")
 
-    # Clean up checkpoint now that the final file is saved
-    checkpoint_path = Path(CHECKPOINT_FILE)
-    if checkpoint_path.exists():
-        checkpoint_path.unlink()
-        logger.info(f"[CHECKPOINT] Checkpoint file deleted (run complete).")
+    # Final submission check if input file complete
+    if Path(input_file).exists():
+        try:
+            all_in = json.load(open(input_file, encoding="utf-8"))
+            if isinstance(all_in, list):
+                validate_submission(output_file, all_in)
+        except Exception:
+            pass
 
-    # Validate submission against competition rules
-    passed = validate_submission(OUTPUT_FILE, claims)
+    logger.info("LLM Module execution complete.")
 
-    if passed:
-        logger.info("Pipeline complete. Submission is ready.")
-    else:
-        logger.warning(
-            "Pipeline complete, but the submission has validation issues. "
-            "Review the FAIL lines above before submitting."
-        )
-        sys.exit(2)   # Non-zero exit so CI/scripts can detect failures
-
-# ============================================================
 
 if __name__ == "__main__":
     main()

@@ -27,15 +27,10 @@ The **Ranker Module** takes candidate retrieved documents for a given claim and 
 ```text
 IndicClaimVer/
 ├── input/                          # Input JSON datasets from retrieval stage
-│   ├── retrived.json
-│   ├── retrived_eng.json
-│   ├── output_bengali.json
-│   └── output_codemix.json
+│   └── retrived_documents.json
 ├── output/                         # Processed and ranked evidence JSON outputs
-│   └── output_ranked_documents.json
-├── ranker.py                       # Single-stage document reranker & first-N sentence extractor
-├── ranker_2.o.py                   # Full two-stage pipeline (BGE Doc Reranker + mMARCO Sentence Reranker)
-├── re_ranker_upd.py                # Flexible sentence reranking script update
+│   └── ranked_documents.json
+├── ranker.py                       # Unified two-stage reranking & noise-filtered evidence extraction script
 ├── requirements.txt                # Python dependencies
 └── README.md                       # Documentation
 ```
@@ -82,7 +77,7 @@ IndicClaimVer/
 ## ⚙️ Usage
 
 ### 1. Preparing Input Data
-Place your JSON input file in the `input/` folder. The expected input format is a JSON array or a JSON object containing a `claims` array:
+Place your JSON input file in `input/retrived_documents.json`. The expected format is:
 
 ```json
 [
@@ -97,30 +92,23 @@ Place your JSON input file in the `input/` folder. The expected input format is 
 ]
 ```
 
-### 2. Running Two-Stage Reranking (`ranker_2.o.py`)
-To execute the complete two-stage reranking (Document BGE + Sentence mMARCO):
+### 2. Running the Reranker (`ranker.py`)
+To execute the unified two-stage reranking (Document BGE-M3 + Sentence mMARCO with 5-layer noise filtering and dynamic word-count targeting):
 
 ```bash
-python ranker_2.o.py
+python ranker.py
 ```
 
-Output will be compiled and saved under `output/output_ranked_documents.json`:
+Output will be saved under `output/ranked_documents.json`:
 
 ```json
 [
   {
     "ID": "claim_001",
     "Text": "The claim text to be verified",
-    "Evidence": "Extracted top relevant evidence sentences joined chronologically..."
+    "Evidence": "Extracted top relevant evidence sentences..."
   }
 ]
-```
-
-### 3. Alternative Reranker (`ranker.py`)
-For simple document ranking and direct sentence slicing without the second-stage sentence cross-encoder:
-
-```bash
-python ranker.py
 ```
 
 ---

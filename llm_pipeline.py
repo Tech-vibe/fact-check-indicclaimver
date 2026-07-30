@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 SERVER_URL   = "http://127.0.0.1:8080/v1/chat/completions"
-MODEL_NAME = "Qwen3-8B-Q4_K_M.gguf"
+MODEL_NAME = "Qwen3-8B-IQ4_XS.gguf"
 
 INPUT_FILE       = r"D:\IndicClaimVerifier\input\topk_output.json"
 OUTPUT_FILE      = r"D:\IndicClaimVerifier\output\submission.json"
@@ -76,55 +76,136 @@ LANGUAGE_NAME_MAP = {
     "english":   "English",
 }
 
+# ISO 639-1 / fastText language code -> project key mapping
+_FASTTEXT_LANG_MAP = {
+    "bn": "bengali",
+    "hi": "hindi",
+    "ta": "tamil",
+    "te": "telugu",
+    "kn": "kannada",
+    "ml": "malayalam",
+    "gu": "gujarati",
+    "pa": "punjabi",
+    "en": "english",
+    # Closely related scripts that could appear
+    "mr": "hindi",    # Marathi uses Devanagari -> treat as hindi script
+    "ne": "hindi",    # Nepali uses Devanagari
+    "ur": "hindi",    # Urdu often mixed with Hindi in Indian news
+    "as": "bengali",  # Assamese script is nearly identical to Bengali
+}
+
+# Module-level probe: attempt to import fast-langdetect once at startup.
+# This avoids repeating the ImportError on every detect_language() call.
+try:
+    from fast_langdetect import detect as _fasttext_detect
+    _FASTTEXT_AVAILABLE = True
+    logger.info("[LANGDETECT] Using fast-langdetect engine (C++/fastText).")
+except Exception as _ft_exc:
+    _fasttext_detect = None
+    _FASTTEXT_AVAILABLE = False
+    logger.info("[LANGDETECT] fast-langdetect not available (%s). Using Unicode fallback.", _ft_exc)
+
 def detect_language(text: str) -> str:
     """
-    Detects the script/language of the text without external dependencies.
-    First checks native script Unicode blocks, then falls back to a frequency
-    check of common Hinglish (Romanized Hindi) stop words.
+    Detects the script/language of the input text.
+
+    Strategy (order matters):
+      1. fast-langdetect (C++/fastText engine, < 0.05 ms) if available.
+         Maps fastText ISO codes to project language keys.
+         If the result is 'english', falls through to Hinglish check (step 3)
+         because fastText has no Hinglish category.
+      2. [Fallback] Unicode block character counting — the original O(n) loop.
+         Used when fast-langdetect is not installed or raises an exception.
+      3. Hinglish stop-word frequency check (always runs for Roman-script text).
     """
+    # ---- Path A: fast-langdetect (preferred) --------------------------------
+    if _FASTTEXT_AVAILABLE:
+        try:
+            # Cap at 80 chars — the hard limit of the underlying fasttext_predict C++ binary.
+            # Pre-truncating here prevents the library from logging its own truncation warning.
+            # 80 Indic Unicode characters (~15-25 words) is far more than fastText needs.
+            # detect() returns a list of dicts: [{'lang': 'bn', 'score': 0.99}, ...]
+            results = _fasttext_detect(text[:80], model='full', k=1)
+            iso_code = results[0].get("lang", "").lower() if results else ""
+            mapped = _FASTTEXT_LANG_MAP.get(iso_code)
+            if mapped and mapped != "english":
+                return mapped
+            # 'english' or unmapped -> fall through to Hinglish check at end
+        except Exception as exc:
+            logger.debug("[LANGDETECT] fast-langdetect error (%s), using Unicode fallback.", exc)
+            # Fast-langdetect failed entirely; run Path B instead
+            text_lower = text.lower()
+
+            devanagari_count = sum(1 for c in text if '\u0900' <= c <= '\u097f')
+            bengali_count    = sum(1 for c in text if '\u0980' <= c <= '\u09ff')
+            tamil_count      = sum(1 for c in text if '\u0b80' <= c <= '\u0bff')
+            telugu_count     = sum(1 for c in text if '\u0c00' <= c <= '\u0c7f')
+            kannada_count    = sum(1 for c in text if '\u0c80' <= c <= '\u0cff')
+            malayalam_count  = sum(1 for c in text if '\u0d00' <= c <= '\u0d7f')
+            gujarati_count   = sum(1 for c in text if '\u0a80' <= c <= '\u0aff')
+            punjabi_count    = sum(1 for c in text if '\u0a00' <= c <= '\u0a7f')
+
+            counts = {
+                "hindi":     devanagari_count,
+                "bengali":   bengali_count,
+                "tamil":     tamil_count,
+                "telugu":    telugu_count,
+                "kannada":   kannada_count,
+                "malayalam": malayalam_count,
+                "gujarati":  gujarati_count,
+                "punjabi":   punjabi_count,
+            }
+
+            max_lang, max_val = max(counts.items(), key=lambda x: x[1])
+            if max_val > 3:
+                return max_lang
+
+    # ---- Path B: Unicode block character counting (only when fast-langdetect
+    #             is NOT installed) --------------------------------------------
+    else:
+        text_lower = text.lower()
+
+        devanagari_count = sum(1 for c in text if '\u0900' <= c <= '\u097f')
+        bengali_count    = sum(1 for c in text if '\u0980' <= c <= '\u09ff')
+        tamil_count      = sum(1 for c in text if '\u0b80' <= c <= '\u0bff')
+        telugu_count     = sum(1 for c in text if '\u0c00' <= c <= '\u0c7f')
+        kannada_count    = sum(1 for c in text if '\u0c80' <= c <= '\u0cff')
+        malayalam_count  = sum(1 for c in text if '\u0d00' <= c <= '\u0d7f')
+        gujarati_count   = sum(1 for c in text if '\u0a80' <= c <= '\u0aff')
+        punjabi_count    = sum(1 for c in text if '\u0a00' <= c <= '\u0a7f')
+
+        counts = {
+            "hindi":     devanagari_count,
+            "bengali":   bengali_count,
+            "tamil":     tamil_count,
+            "telugu":    telugu_count,
+            "kannada":   kannada_count,
+            "malayalam": malayalam_count,
+            "gujarati":  gujarati_count,
+            "punjabi":   punjabi_count,
+        }
+
+        max_lang, max_val = max(counts.items(), key=lambda x: x[1])
+        if max_val > 3:  # Threshold: at least 4 Indic chars to avoid stray symbols
+            return max_lang
+
+    # ---- Path C: Hinglish stop-word check (Roman-script Hindi) --------------
+    # Runs when: (A) fast-langdetect returned 'english'/unmapped, or
+    #            (B) Unicode loop found no dominant Indic script.
     text_lower = text.lower()
-    
-    # 1. Unicode block checks for native scripts
-    devanagari_count = sum(1 for c in text if '\u0900' <= c <= '\u097f')
-    bengali_count = sum(1 for c in text if '\u0980' <= c <= '\u09ff')
-    tamil_count = sum(1 for c in text if '\u0b80' <= c <= '\u0bff')
-    telugu_count = sum(1 for c in text if '\u0c00' <= c <= '\u0c7f')
-    kannada_count = sum(1 for c in text if '\u0c80' <= c <= '\u0cff')
-    malayalam_count = sum(1 for c in text if '\u0d00' <= c <= '\u0d7f')
-    gujarati_count = sum(1 for c in text if '\u0a80' <= c <= '\u0aff')
-    punjabi_count = sum(1 for c in text if '\u0a00' <= c <= '\u0a7f')
-    
-    counts = {
-        "hindi": devanagari_count,
-        "bengali": bengali_count,
-        "tamil": tamil_count,
-        "telugu": telugu_count,
-        "kannada": kannada_count,
-        "malayalam": malayalam_count,
-        "gujarati": gujarati_count,
-        "punjabi": punjabi_count,
-    }
-    
-    max_lang, max_val = max(counts.items(), key=lambda x: x[1])
-    if max_val > 3:  # Threshold of at least 4 characters to avoid stray symbols
-        return max_lang
-        
-    # 2. Check for Hinglish (Romanized Hindi)
-    # Match clean alphabetic words
     words = re.findall(r'[a-z]+', text_lower)
-    
-    # High-confidence Hinglish-specific words
+
     hinglish_high_conf = {
-        "hai", "hain", "ki", "ke", "ka", "ko", "se", "bhi", "tha", "thi", 
-        "aur", "toh", "kya", "kyu", "kyon", "hoga", "hogi", "hoge", 
-        "gaya", "gayi", "gaye", "hua", "hui", "hue", "kar", "karna", "kr", 
+        "hai", "hain", "ki", "ke", "ka", "ko", "se", "bhi", "tha", "thi",
+        "aur", "toh", "kya", "kyu", "kyon", "hoga", "hogi", "hoge",
+        "gaya", "gayi", "gaye", "hua", "hui", "hue", "kar", "karna", "kr",
         "rha", "raha", "rahi", "rahe", "lekin", "magar", "sath", "saath"
     }
-    
+
     matches = sum(1 for w in words if w in hinglish_high_conf)
     if matches >= 2:
         return "hinglish"
-        
+
     return "english"
 
 
@@ -360,13 +441,13 @@ def build_prompt(claim: str, retrieved_evidence: str, lang_name: str = "English"
     """
     lang_instruction = ""
     if lang_name != "English":
-        if lang_name.lower() == "hinglish":
+        if "hinglish" in lang_name.lower() or "code-mix" in lang_name.lower():
             lang_instruction = f"""
-Language & Length Guidance for HINGLISH:
-The claim is written in Hinglish (Romanized Hindi using Latin alphabet).
-Write BOTH "Evidence" and "Justification" fields in clean Hinglish (Romanized Hindi).
+Language & Length Guidance for HINGLISH / CODE-MIX:
+The claim or evidence contains Hinglish / Code-mixed text (Romanized Hindi or mixed scripts).
+You MUST write BOTH the "Evidence" and "Justification" fields entirely in clear, formal ENGLISH.
 The "Prediction" field MUST remain strictly "SUPPORTS" or "REFUTES" (in English).
-CRITICAL LENGTH RULE FOR HINGLISH: Write at least 8 to 12 detailed sentences for Evidence (100-150 words) and 8 to 12 detailed sentences for Justification (100-120 words).
+CRITICAL LENGTH RULE FOR ENGLISH OUTPUT: Write at least 8 to 12 detailed sentences for Evidence (100-150 words) and 8 to 12 detailed sentences for Justification (100-120 words).
 """
         else:
             lang_instruction = f"""
@@ -427,20 +508,18 @@ Example output:
 # STEP 4 - CALL LLM
 # ============================================================
 
+# Persistent HTTP session with connection pooling for socket reuse
+_HTTP_SESSION = requests.Session()
+
 def call_llm_messages(messages: list) -> str:
     """
-    Sends a message list (chat history) to the local LLM server
-    and returns the raw string response from the model.
+    Sends a chat completions request to llama-server.
 
     Args:
         messages: List of message dicts (role, content).
 
     Returns:
         Raw model output as a string.
-
-    Raises:
-        requests.HTTPError on non-2xx response.
-        requests.Timeout   if the server does not respond in time.
     """
     payload = {
         "model":          MODEL_NAME,
@@ -453,7 +532,7 @@ def call_llm_messages(messages: list) -> str:
         "stream":         False
     }
 
-    response = requests.post(
+    response = _HTTP_SESSION.post(
         SERVER_URL,
         json=payload,
         timeout=300

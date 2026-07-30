@@ -57,9 +57,30 @@ import re
 import queue
 import threading
 import logging
+import unicodedata
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---- Module-level probe for indic-nlp-library --------------------------------
+#
+# Import the normalizer factory once at startup. If the library is not
+# installed, _INDIC_NLP_AVAILABLE stays False and the normalizer step is
+# silently skipped inside _normalize_indic_unicode().
+
+try:
+    from indicnlp.normalize.indic_normalize import IndicNormalizerFactory as _IndicNormalizerFactory
+    _indic_normalizer_factory = _IndicNormalizerFactory()
+    _INDIC_NLP_AVAILABLE = True
+    logger.info("[SANITIZER] indic-nlp-library loaded — Indic Unicode normalization active.")
+except Exception as _indic_exc:
+    _indic_normalizer_factory = None
+    _INDIC_NLP_AVAILABLE = False
+    logger.info("[SANITIZER] indic-nlp-library not available (%s). Using unicodedata NFC fallback.", _indic_exc)
+
+# Per-language normalizer cache so we don't reconstruct on every call.
+# Key: indicnlp language code string ('bn', 'hi', etc.)
+_normalizer_cache: dict = {}
 
 # ---- Tuning constants -------------------------------------------------------
 
@@ -185,9 +206,62 @@ def _clean_web_scraped_boilerplate(text: str) -> str:
     return text.strip()
 
 
+def _remove_mojibake_artifacts(text: str) -> str:
+    """
+    Removes Mojibake, multi-byte UTF-8 decoding corruption, and repetitive
+    Latin-1 byte sequences (e.g. 'à à à à à ²à à à à à à à ¾...') caused by
+    web scrapers reading Indic UTF-8 bytes as Windows-1252 / ISO-8859-1.
+    
+    Stripping these sequences pulls the actual informative body text forward
+    before character/token truncation occurs.
+    """
+    # Pattern for repeated latin-1 artifact chars and replacement chars: à, ¾, ², ¹, ª, â, µ, , etc.
+    mojibake_re = re.compile(r'(?:[\u00e0\u00be\u00b2\u00b9\u00aa\u00e2\u00b5\ufffd\xa0]\s*|[\.,]\s*){3,}')
+    text = mojibake_re.sub(' ', text)
+    text = re.sub(r'[,\.\s]{3,}', ' ', text)
+    return text
+
+
+def _normalize_indic_unicode(text: str, lang_code: str = 'hi') -> str:
+    """
+    Normalize Indic Unicode codepoints to NFC canonical form so that two
+    visually-identical strings with different byte representations (e.g.
+    precomposed vs decomposed vowel matras in Bengali/Hindi) are treated
+    as identical by downstream text matchers and the LLM tokenizer.
+
+    Uses IndicNormalizerFactory from indic-nlp-library when available,
+    which handles script-specific edge cases (nukta, anusvara, chandrabindu,
+    half-consonant forms) for 12+ languages.
+
+    Fallback (always safe): Python's built-in unicodedata.normalize('NFC', text)
+    which handles standard Unicode composition but lacks Indic-specific rules.
+
+    Args:
+        text:      Input text string.
+        lang_code: ISO 639-1 code for the script ('bn', 'hi', 'ta', 'te',
+                   'kn', 'ml', 'gu', 'pa'). Defaults to 'hi' (Devanagari).
+                   Ignored when using the NFC fallback.
+
+    Returns:
+        Normalized text string.
+    """
+    if _INDIC_NLP_AVAILABLE:
+        try:
+            # Retrieve or build a cached normalizer for this language
+            if lang_code not in _normalizer_cache:
+                _normalizer_cache[lang_code] = _indic_normalizer_factory.get_normalizer(lang_code)
+            normalizer = _normalizer_cache[lang_code]
+            return normalizer.normalize(text)
+        except Exception as exc:
+            logger.debug("[SANITIZER] indic-nlp normalize error for lang='%s' (%s). Using NFC.", lang_code, exc)
+
+    # NFC fallback: standard Unicode canonical decomposition + recomposition
+    return unicodedata.normalize('NFC', text)
+
+
 # ---- Public sanitize API ----------------------------------------------------
 
-def sanitize_text(text: Any, max_chars: int, field_name: str) -> str:
+def sanitize_text(text: Any, max_chars: int, field_name: str, lang_code: str = 'hi') -> str:
     """
     Apply the full sanitization pipeline to a single text field.
 
@@ -196,14 +270,20 @@ def sanitize_text(text: Any, max_chars: int, field_name: str) -> str:
       2. Fix backslash-quote sequences  -> eliminates JSON-breaking escapes.
       3. Remove C0/C1 control characters.
       4. Normalize Unicode typographic characters -> ASCII equivalents.
-      5. Strip web-scraped site navigation menus / headers.
-      6. Normalize whitespace.
-      7. Truncate to max_chars            -> prevents token overflow.
+      4b. Normalize Indic Unicode codepoints to NFC canonical form
+          (via indic-nlp-library if available, unicodedata.normalize NFC otherwise).
+      5. Remove Mojibake and UTF-8 byte decoding artifacts (à à à à à ²...).
+      6. Strip web-scraped site navigation menus / headers.
+      7. Normalize whitespace.
+      8. Truncate to max_chars            -> prevents token overflow.
 
     Args:
         text:       Raw input value from the JSON record.
         max_chars:  Maximum allowed character count after sanitization.
         field_name: Label used in log/debug messages only.
+        lang_code:  ISO 639-1 language code used by indic-nlp-library normalizer
+                    (e.g. 'bn', 'hi', 'ta'). Defaults to 'hi'. Ignored when
+                    indic-nlp-library is not installed.
 
     Returns:
         A clean, safe string ready to embed in the LLM prompt.
@@ -214,6 +294,8 @@ def sanitize_text(text: Any, max_chars: int, field_name: str) -> str:
     text = _fix_backslash_quotes(text)
     text = _remove_control_chars(text)
     text = _normalize_unicode(text)
+    text = _normalize_indic_unicode(text, lang_code=lang_code)   # step 4b
+    text = _remove_mojibake_artifacts(text)
     text = _clean_web_scraped_boilerplate(text)
     text = _normalize_whitespace(text)
     text = _truncate(text, max_chars, field_name)

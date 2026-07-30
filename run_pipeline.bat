@@ -21,7 +21,7 @@ taskkill /IM llama-server.exe /F >nul 2>&1
 
 :: 2. Start llama-server in the background (hidden)
 echo Starting llama-server on GPU in background...
-start /B "" ".\llama.cpp\build\bin\Release\llama-server.exe" -m ".\models\Qwen3-8B-Q4_K_M.gguf" --port 8080 -c 8192 -np 1 -fa on --reasoning off -ngl 99 > nul 2>&1
+start /B "" ".\llama.cpp\build\bin\Release\llama-server.exe" -m ".\models\Qwen3-8B-IQ4_XS.gguf" --port 8080 -c 8192 -np 1 -fa on --reasoning off -ngl 99 -ctk q8_0 -ctv q8_0 -ub 1024 > nul 2>&1
 
 :: 3. Wait 12 seconds for the model to fully load into GPU VRAM
 echo Waiting for GPU server to initialize...

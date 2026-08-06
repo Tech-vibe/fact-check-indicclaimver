@@ -1,0 +1,57 @@
+# ============================================================
+# IndicClaimVerifier — Master Root .gitignore
+# ============================================================
+
+# Virtual Environments
+.venv/
+venv/
+env/
+*/.venv/
+*/venv/
+
+# Python Bytecode & Cache
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Large Model Binaries & Weights
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.onnx
+models/*.gguf
+LLM/models/*.gguf
+LLM/llama.cpp/
+llama-server.exe
+*.exe
+*.dll
+
+# Generated Output Files & Directories (keep directory structures via .gitkeep)
+Output/Retrieved_Output/*
+!Output/Retrieved_Output/.gitkeep
+
+Output/Ranker_Output/*
+!Output/Ranker_Output/.gitkeep
+
+Output/LLM_Output/*
+!Output/LLM_Output/.gitkeep
+
+Output/*.json
+*.tmp
+*_checkpoint.json
+
+# Runtime Logs
+logs/*
+!logs/.gitkeep
+*.log
+.system_generated/
+
+# OS & IDE Junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,25 @@
+# Master Dependencies for Indic_Claim_Ver Pipeline (Retrieval + Ranker + LLM)
+
+# PyTorch CUDA 12.1 GPU Acceleration
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+
+# Ranker Module Neural Reranking Engine
+transformers>=4.30.0
+sentence-transformers>=2.2.2
+FlagEmbedding>=1.2.0
+
+# Retrieval Module Dependencies
+duckduckgo-search>=6.1.7
+ddgs
+deep_translator
+indic_transliteration
+beautifulsoup4
+urllib3
+langdetect
+wikipedia>=1.4.0
+
+# LLM Module & Indic NLP Engine
+requests>=2.28.0
+indic-nlp-library>=0.91
+fast-langdetect>=0.2.0

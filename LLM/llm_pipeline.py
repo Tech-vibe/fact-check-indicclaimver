@@ -1413,7 +1413,7 @@ def ensure_llm_server_running() -> bool:
     return check_server_reachable()
 
 
-def stream_input_claims(input_filepath: str, target_total: int | None = None, poll_interval: float = 1.5, max_idle_seconds: int = 120):
+def stream_input_claims(input_filepath: str, target_total: int | None = None, poll_interval: float = 1.5, max_idle_seconds: int = 1800):
     """
     Generator that streams incoming claim objects from input_filepath.
     Patiently waits/polls when Retrieval or Ranker is delayed in writing claims.
@@ -1455,13 +1455,16 @@ def stream_input_claims(input_filepath: str, target_total: int | None = None, po
                 # Ranker is currently writing file -> ignore and retry next poll
                 pass
 
-        if target_total is not None and yielded_count >= target_total:
-            return
-
-        idle_time = time.time() - last_activity
-        if yielded_count > 0 and idle_time > max_idle_seconds:
-            logger.info(f"[LISTENER] Stream complete ({yielded_count} claim(s) processed).")
-            return
+        if target_total is not None:
+            if yielded_count >= target_total:
+                logger.info(f"[LISTENER] Reached target claim count ({target_total}). Stopping listener.")
+                return
+            # When target_total is specified, keep listening patiently until target_total is reached.
+        else:
+            idle_time = time.time() - last_activity
+            if yielded_count > 0 and idle_time > max_idle_seconds:
+                logger.info(f"[LISTENER] Stream complete ({yielded_count} claim(s) processed).")
+                return
 
         if yielded_count == 0:
             waited = int(time.time() - start_wait)

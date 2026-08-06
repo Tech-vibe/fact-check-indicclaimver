@@ -188,10 +188,23 @@ def main():
             print(f"\n[MAIN] All {total_count} claims successfully verified!")
             break
 
-        # Check if any module crashed
-        if proc_llm.poll() is not None and proc_llm.returncode != 0:
-            print("[MAIN ERROR] LLM module failed.")
-            break
+        # Auto-recovery: Relaunch LLM module if it exited before completing all claims
+        if proc_llm.poll() is not None and llm_count < total_count:
+            print(f"[MAIN RECOVERY] LLM module exited at {llm_count}/{total_count} claims. Relaunching LLM module...")
+            time.sleep(2.0)
+            proc_llm = subprocess.Popen(llm_cmd, cwd=str(root_dir / "LLM"))
+
+        # Auto-recovery: Relaunch Ranker module if it exited before completing all claims
+        if proc_ranker.poll() is not None and rk_count < total_count and r_count > rk_count:
+            print(f"[MAIN RECOVERY] Ranker module exited at {rk_count}/{total_count} claims. Relaunching Ranker module...")
+            time.sleep(2.0)
+            proc_ranker = subprocess.Popen(ranker_cmd, cwd=str(root_dir / "Ranker"))
+
+        # Auto-recovery: Relaunch Retrieval module if it exited before completing all claims
+        if proc_retrieval.poll() is not None and r_count < total_count:
+            print(f"[MAIN RECOVERY] Retrieval module exited at {r_count}/{total_count} claims. Relaunching Retrieval module...")
+            time.sleep(2.0)
+            proc_retrieval = subprocess.Popen(retrieval_cmd, cwd=str(root_dir / "Retrieval"))
 
         time.sleep(2.0)
 

@@ -1,0 +1,9 @@
+langdetect>=1.0.9
+wikipedia>=1.4.0
+duckduckgo-search>=6.1.7
+ddgs
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+deep_translator
+indic_transliteration
+urllib3
